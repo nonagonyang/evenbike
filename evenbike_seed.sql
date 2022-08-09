@@ -40,11 +40,10 @@ VALUES ('testuser1',
 
 
 
-INSERT INTO trips(username,start_dock,end_dock,duration,distance,eco_points,active_points)
+INSERT INTO trips(username,start_dock,end_dock,distance,eco_points,active_points)
 VALUES('testuser1',
        'street_x',
        'street_y',
-       20.5,
        15.5,
        3,
        6
@@ -52,7 +51,6 @@ VALUES('testuser1',
        ('testuser1',
        'street_a',
        'street_b',
-       10.1,
        8.1,
        2,
        1
@@ -60,7 +58,6 @@ VALUES('testuser1',
        ('testuser1',
        'street_a',
        'street_b',
-       50.8,
        25.8,
        11,
        20
@@ -68,7 +65,6 @@ VALUES('testuser1',
        ('testuser2',
        'street_m',
        'street_n',
-       20.1,
        16.1,
        4,
        2);

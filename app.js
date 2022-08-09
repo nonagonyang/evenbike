@@ -12,6 +12,7 @@ const { authenticateJWT } = require("./middleware/auth");
 
 const authRoutes = require("./routes/auth");
 const profileRoutes = require("./routes/profile");
+const tripRoutes = require("/routes/trip");
 
 /**Third-party middleware */
 app.use(cors());

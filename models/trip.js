@@ -1,9 +1,14 @@
+//store actual trip info.
+//once the user pressed the start trip button, create a trip instance and store it to trips table
+//return an identifer of the trip
+//user the identifer later after the trip has ended.
+
 "use strict";
 
 const db = require("../db");
 const bcrypt = require("bcrypt");
-
 const { sqlForPartialUpdate } = require("../helpers/updatesql");
+const { getNearbyDocks } = require("../helpers/getdocks");
 
 const {
   NotFoundError,
@@ -13,41 +18,37 @@ const {
 
 const { BCRYPT_WORK_FACTOR } = require("../config.js");
 
-/** Related functions for users. */
+/** Related functions for trips. */
 
-class User {
-  /** authenticate user with email, password.
+class Trip {
+  /** given location[geo coordinates] based on user input
    *
-   * Returns { username, email, is_admin }
+   * Returns a list of nearby bike docks ordered by dock occupancy in descending order.
    *
-   * Throws UnauthorizedError is user not found or wrong password.
+   * Throws NotFoundError if no bike docks is returned from the TFL API.
    **/
-
-  static async authenticate(email, password) {
-    // try to find the user first
+  static async recommendDocks(coord1) {
+    const docks = await getNearbyDocks(coord1);
+    if (docks.length == 0)
+      throw new NotFoundError(`No Bike Docks Found near: ${coord1}`);
+  }
+  static async startTrip({ username, start_dock, start_time }) {
     const result = await db.query(
-      `SELECT username,
-                  password,
-                  email,
-                  is_admin
-           FROM users
-           WHERE email = $1`,
-      [email]
+      `INSERT INTO trips
+             (username,
+              start_dock,
+              start_time)
+             VALUES ($1, $2,$3)
+             RETURNING id, username, start_dock,start_time`,
+      [username, start_dock, start_time]
     );
 
     const user = result.rows[0];
 
-    if (user) {
-      // compare hashed password to a new hash from password
-      const isValid = await bcrypt.compare(password, user.password);
-      if (isValid === true) {
-        delete user.password;
-        return user;
-      }
-    }
-
-    throw new UnauthorizedError("Invalid username/password");
+    return user;
   }
+  static async endTrip() {}
+  static async findAll() {}
 
   /** Register user with data.
    *
@@ -202,4 +203,4 @@ class User {
   }
 }
 
-module.exports = User;
+module.exports = Trip;
