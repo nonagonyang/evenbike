@@ -6,17 +6,13 @@
 "use strict";
 
 const db = require("../db");
-const bcrypt = require("bcrypt");
 const { sqlForPartialUpdate } = require("../helpers/updatesql");
-const { getNearbyDocks } = require("../helpers/getdocks");
-
 const {
-  NotFoundError,
-  BadRequestError,
-  UnauthorizedError,
-} = require("../expressError");
-
-const { BCRYPT_WORK_FACTOR } = require("../config.js");
+  getNearbyDocks,
+  getOccupancy,
+  getDistance,
+} = require("../helpers/getdocks");
+const { NotFoundError, BadRequestError } = require("../expressError");
 
 /** Related functions for trips. */
 
@@ -24,15 +20,35 @@ class Trip {
   /** given location[geo coordinates] based on user input
    *
    * Returns a list of nearby bike docks ordered by dock occupancy in descending order.
+   * [{dock1},...{dock5}]
    *
    * Throws NotFoundError if no bike docks is returned from the TFL API.
    **/
   static async recommendDocks(coord1) {
-    const docks = await getNearbyDocks(coord1);
+    const arrDocks = await getNearbyDocks(coord1);
     if (docks.length == 0)
       throw new NotFoundError(`No Bike Docks Found near: ${coord1}`);
+    return arrDocks;
   }
+
+  /** given username, start_dock(dock id from tfl API), and start_time from the frontend,
+   * save the trip in database to trips table
+   * check if the user first, if no user, throw BadRequestError
+   */
+
   static async startTrip({ username, start_dock, start_time }) {
+    const userCheck = await db.query(
+      `SELECT username
+             FROM users
+             WHERE username = $1`,
+      [username]
+    );
+    if (!userCheck.rows[0]) {
+      throw new BadRequestError(
+        `No user found under the username: ${username}`
+      );
+    }
+
     const result = await db.query(
       `INSERT INTO trips
              (username,
@@ -43,163 +59,177 @@ class Trip {
       [username, start_dock, start_time]
     );
 
-    const user = result.rows[0];
+    const trip = result.rows[0];
 
-    return user;
+    return trip;
   }
-  static async endTrip() {}
-  static async findAll() {}
-
-  /** Register user with data.
-   *
-   * Returns { username, email, isAdmin }
-   *
-   * Throws BadRequestError on duplicates.
-   **/
-
-  static async register({
-    username,
-    password,
-    weight,
-    height,
-    email,
-    is_admin,
-  }) {
-    const duplicateCheck = await db.query(
-      `SELECT username
-           FROM users
-           WHERE username = $1`,
-      [username]
-    );
-
-    if (duplicateCheck.rows[0]) {
-      throw new BadRequestError(`Duplicate username: ${username}`);
-    }
-
-    const hashedPassword = await bcrypt.hash(password, BCRYPT_WORK_FACTOR);
-
-    const result = await db.query(
-      `INSERT INTO users
-           (username,
-            password,
-            weight,
-            height,
-            email,
-            is_admin)
-           VALUES ($1, $2, $3, $4, $5, $6)
-           RETURNING username, email, is_admin`,
-      [username, hashedPassword, weight, height, email, is_admin]
-    );
-
-    const user = result.rows[0];
-
-    return user;
-  }
-
-  /** Update user data with `data`.
+  /** Update trip data with `data`.
    *
    * This is a "partial update" --- it's fine if data doesn't contain
    * all the fields; this only changes provided ones.
    *
    * Data can include:
-   * { password, email, height, weight }
+   * { end_dock(dock id from tfl API), end_time }
    *
-   * Returns { username, email, height, weight }
+   * Returns { id, username, start_dock, end_dock, start_time, end_time}
    *
    * Throws NotFoundError if not found.
-   *
-   * WARNING: this function can set a new password.
-   * Callers of this function must be certain they have validated inputs to this
-   * or a serious security risks are opened.
    */
-  //TODO check out sqlForPartial Update
-  static async update(username, data) {
-    if (data.password) {
-      data.password = await bcrypt.hash(data.password, BCRYPT_WORK_FACTOR);
-    }
-
+  static async updateTrip(id, data) {
     const { setCols, values } = sqlForPartialUpdate(data, {
-      password: "password",
-      email: "email",
-      height: "height",
-      weight: "weight",
+      end_dock: "end_dock",
+      end_time: "end_time",
     });
-    const usernameVarIdx = "$" + (values.length + 1);
 
-    const querySql = `UPDATE users 
-                      SET ${setCols} 
-                      WHERE username = ${usernameVarIdx} 
-                      RETURNING username,
-                                email,
-                                weight,
-                                height`;
-    const result = await db.query(querySql, [...values, username]);
-    const user = result.rows[0];
+    // id is the last element in the array of values to be set.
+    const idVarIdx = "$" + (values.length + 1);
 
-    if (!user) throw new NotFoundError(`No user: ${username}`);
+    const querySql = `UPDATE trips 
+                        SET ${setCols} 
+                        WHERE id = ${idVarIdx} 
+                        RETURNING id,
+                                  username,
+                                  start_dock,
+                                  end_dock,
+                                  start_time,
+                                  end_time`;
+    const result = await db.query(querySql, [...values, id]);
+    const trip = result.rows[0];
 
-    delete user.password;
-    return user;
+    if (!trip) throw new NotFoundError(`No trip has been found: ${id}`);
+    return trip;
   }
 
-  /** Find all users [**admin use**]
-   *
-   * Returns [{ username, height, weight, email, is_admin }, ...]
-   **/
-  static async findAll() {
-    const result = await db.query(
-      `SELECT username,
-              height,
-              weight,
-              email,
-              is_admin
-        FROM users
-        ORDER BY username`
-    );
+  static async endTrip(id) {
+    // Calculate the distance, duration, eco_points, and active_points first.
+    const duration = await this.calculateDuration(id);
+    const distance = await this.calculateDistance(id);
+    const eco_points = await this.calculateEcoPoints(id);
+    const active_points = await this.calculateActivePoints(id);
+    const data = { duration, distance, eco_points, active_points };
 
+    const { setCols, values } = sqlForPartialUpdate(data, {
+      distance: "distance",
+      duration: "duration",
+      eco_points: "eco_points",
+      active_points: "active_points",
+    });
+
+    // Update the trip in database
+    // id is the last element in the array of values to be set.
+    const idVarIdx = "$" + (values.length + 1);
+
+    const querySql = `UPDATE trips 
+                        SET ${setCols} 
+                        WHERE id = ${idVarIdx} 
+                        RETURNING *`;
+    const result = await db.query(querySql, [...values, id]);
+    const trip = result.rows[0];
+    if (!trip) throw new NotFoundError(`No trip has been found: ${id}`);
+    return trip;
+  }
+
+  /** Find a user's all trips
+   *
+   * Returns [{ id, ...]
+   **/
+  static async findAll(username) {
+    const result = await db.query(
+      `SELECT 
+              id,
+              username,
+              start_dock,
+              start_time,
+              end_dock,
+              end_time,
+              distance,
+              eco_points,
+              active_points
+        FROM trips
+        WHERE username= $1
+        ORDER BY start_time`,
+      [username]
+    );
     return result.rows;
   }
 
-  /** Given a username, return data about user.[admin use]
-   *
-   * Returns { username, first_name, last_name, is_admin, jobs }
-   *   where jobs is { id, title, company_handle, company_name, state }
-   *
-   * Throws NotFoundError if user not found.
-   **/
+  /** after the trip has ended, calculate the trip's ecopoints */
+  static async calculateEcoPoints(id) {
+    const trip = await this.get(id);
+    const start_dock = trip["start_dock"];
+    const end_dock = trip["end_dock"];
+    const start_occupancy = await getOccupancy(start_dock);
+    const end_occupancy = await getOccupancy(end_dock);
+    const eco_points = ((start_occupancy - end_occupancy) * 10).toFixed(0);
 
-  static async get(username) {
-    const userRes = await db.query(
-      `SELECT username,
-              height,
-              weight,
-              email,
-              is_admin
-        FROM users
-        WHERE username = $1`,
-      [username]
-    );
-
-    const user = userRes.rows[0];
-
-    if (!user) throw new NotFoundError(`No user: ${username}`);
-
-    return user;
+    return eco_points;
+  }
+  static async calculateDuration(id) {
+    const trip = await this.get(id);
+    // const duration = trip["end_time"] - trip["start_time"];
+    const duration = 10;
+    return duration;
   }
 
-  /** Delete given user from database; returns undefined. */
+  // TODO write calculateActivePoints
+  static async calculateActivePoints(id) {
+    const distance = await this.calculateDistance(id);
+    const active_points = Math.floor(distance);
+    return active_points;
+  }
 
-  static async remove(username) {
+  static async calculateDistance(id) {
+    const trip = await this.get(id);
+    const start_dock = trip["start_dock"];
+    const end_dock = trip["end_dock"];
+    // TODO write getDistance function
+    // biking distance from point1 to point2
+    //multiple routes between two points???
+    const distance = await getDistance(start_dock, end_dock);
+    return distance;
+  }
+
+  /** Given a trip id, return data about a trip.
+   *
+   * Returns { trip id, start_dock, end_dock, start_time, end_time, distance, eco_points, active_points }
+   *
+   * Throws NotFoundError if trip is not found.
+   **/
+
+  static async get(id) {
+    const tripRes = await db.query(
+      `SELECT start_dock,
+              end_dock,
+              start_time,
+              end_time,
+              eco_points,
+              active_points
+        FROM trips
+        WHERE id = $1`,
+      [id]
+    );
+
+    const trip = tripRes.rows[0];
+
+    if (!trip) throw new NotFoundError(`No trip: ${id}`);
+
+    return trip;
+  }
+
+  /**Given a trip id, delete the trip
+   * Often used when a trip is not valid.
+   */
+  static async remove(id) {
     let result = await db.query(
       `DELETE
-           FROM users
-           WHERE username = $1
-           RETURNING username`,
-      [username]
+           FROM trips
+           WHERE id = $1
+           RETURNING id`,
+      [id]
     );
-    const user = result.rows[0];
+    const trip = result.rows[0];
 
-    if (!user) throw new NotFoundError(`No user: ${username}`);
+    if (!trip) throw new NotFoundError(`No trip to be deleted: ${id}`);
   }
 }
 

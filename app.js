@@ -12,7 +12,7 @@ const { authenticateJWT } = require("./middleware/auth");
 
 const authRoutes = require("./routes/auth");
 const profileRoutes = require("./routes/profile");
-const tripRoutes = require("/routes/trip");
+const tripRoutes = require("./routes/trip");
 
 /**Third-party middleware */
 app.use(cors());
@@ -27,6 +27,7 @@ app.use(express.json());
 /**Router-level middleware*/
 app.use("/auth", authRoutes);
 app.use("/profile", profileRoutes);
+app.use("/trip", tripRoutes);
 
 /** Error-handling middleware */
 

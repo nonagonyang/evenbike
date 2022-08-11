@@ -131,7 +131,13 @@ class User {
                       RETURNING username,
                                 email,
                                 weight,
-                                height`;
+                                height,
+                                eco_points,
+                                active_points,
+                                total_points,
+                                eco_level,
+                                active_level,
+                                overall_level`;
     const result = await db.query(querySql, [...values, username]);
     const user = result.rows[0];
 
@@ -159,7 +165,7 @@ class User {
     return result.rows;
   }
 
-  /** Given a username, return data about user.[admin use]
+  /** Given a username, return data about user
    *
    * Returns { username, first_name, last_name, is_admin, jobs }
    *   where jobs is { id, title, company_handle, company_name, state }
@@ -173,7 +179,13 @@ class User {
               height,
               weight,
               email,
-              is_admin
+              is_admin,
+              eco_points,
+              active_points,
+              total_points,
+              eco_level,
+              active_level,
+              overall_level
         FROM users
         WHERE username = $1`,
       [username]

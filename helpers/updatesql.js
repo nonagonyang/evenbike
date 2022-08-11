@@ -1,11 +1,24 @@
 const { BadRequestError } = require("../expressError");
 
-// dataToUpdate is an object containing key: value pairs
-//
-// keys is an array of a given object's own enumerable property names
+/**querySql is a string
+ * This is what sql upate syntax looks like
+ *`UPDATE trip 
+ SET end_dock = $1, end_time = $2  
+ WHERE id = $3
+ RETURNING *, [value1, value2, value3]
+ * 
+ setCols makes the string after SET keyword: "end_dock = $1,end_time = $2"
+
+ dataToUpdate is an object looks like:
+ {end_dock: "BikePoints_180"}
+ {end_time: "2004-10-19 20:23:54"}
+ *
+ values look like this ["BikePoints_180","2004-10-19 20:23:54]
+ */
 
 function sqlForPartialUpdate(dataToUpdate, jsToSql) {
   const keys = Object.keys(dataToUpdate);
+
   if (keys.length === 0) throw new BadRequestError("No data");
 
   // {username: 'testuser1', weight: 100} => ['"username"=$1', '"weight"=$2']
@@ -15,7 +28,7 @@ function sqlForPartialUpdate(dataToUpdate, jsToSql) {
   );
 
   return {
-    setCols: cols.join(", "),
+    setCols: cols.join(","),
     values: Object.values(dataToUpdate),
   };
 }
