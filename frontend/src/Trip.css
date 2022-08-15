@@ -1,0 +1,11 @@
+.Trip-StartBnt {
+  position: fixed;
+  top: 400px;
+  right: 100px;
+}
+
+.Trip-EndBnt {
+  position: fixed;
+  top: 450px;
+  right: 100px;
+}
